@@ -1,0 +1,31 @@
+[
+  {
+    "linkId": "7f5def28-8982-46ae-8fc0-a64c2eb713f3",
+    "ownerId": 6884720065,
+    "ownerChatId": 6884720065,
+    "createdAt": "2026-05-12T12:40:12.498Z",
+    "clicks": 0
+  },
+  {
+    "linkId": "0ddf5d07-2e14-4554-89e0-cb7b920df05b",
+    "ownerId": 6884720065,
+    "ownerChatId": 6884720065,
+    "createdAt": "2026-05-12T12:41:59.835Z",
+    "clicks": 0
+  },
+  {
+    "linkId": "9bb8a72d-873a-40f4-bc6c-a60bea481771",
+    "ownerId": 8618245383,
+    "ownerChatId": 8618245383,
+    "createdAt": "2026-05-12T12:46:23.249Z",
+    "clicks": 0
+  },
+  {
+    "linkId": "2829be04-60bd-4959-a546-4fc9024f7176",
+    "ownerName": "Victor",
+    "telegramUsername": "VT_tech",
+    "ownerChatId": 6884720065,
+    "thumbnail": "/uploads/b92771b8-762c-45d3-8d8e-f09e4b75320d.jpg",
+    "createdAt": "2026-05-12T16:02:53.999Z"
+  }
+]
