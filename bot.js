@@ -13,6 +13,7 @@ const BOT_TOKEN = process.env.BOT_TOKEN;
 const BASE_URL = process.env.BASE_URL;
 const BOT_API_PORT = process.env.BOT_API_PORT || 5000;
 const NOTIFY_API_KEY = process.env.NOTIFY_API_KEY;
+const VPS_IP = process.env.VPS_IP;
 
 if (!BOT_TOKEN || !BASE_URL) {
     console.error('Missing BOT_TOKEN or BASE_URL in .env');
@@ -33,6 +34,10 @@ console.log('🤖 Telegram bot running...');
 ========================= */
 const app = express();
 app.use(express.json());
+app.use(
+  '/uploads',
+  express.static('uploads')
+);
 
 /* =========================
    SESSION STORE
@@ -185,7 +190,7 @@ bot.on('photo', async (msg) => {
             ownerChatId:
                 chatId,
             thumbnail:
-                `/uploads/${filename}`,
+                `http://${VPS_IP}:5000/uploads/${filename}`,
             createdAt:
                 new Date().toISOString()
         });
@@ -205,6 +210,23 @@ bot.on('photo', async (msg) => {
             'Error processing image. Please try again.'
         );
     }
+});
+
+//get link id 
+app.get('/links/:id', (req, res) => {
+    const links = getLinks();
+
+    const link = links.find(
+        l => l.linkId === req.params.id
+    );
+
+    if (!link) {
+        return res.status(404).json({
+            error: 'Not found'
+        });
+    }
+
+    res.json(link);
 });
 
 /* =========================
