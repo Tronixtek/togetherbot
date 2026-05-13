@@ -20,6 +20,8 @@ const VPS_IP = process.env.VPS_IP;
 const BOT_PUBLIC_URL =
     process.env.BOT_PUBLIC_URL ||
     (VPS_IP ? `http://${VPS_IP}:${BOT_API_PORT}` : `http://localhost:${BOT_API_PORT}`);
+const LINKS_FILE = path.join(__dirname, 'links.json');
+const UPLOADS_DIR = path.join(__dirname, 'uploads');
 
 if (!BOT_TOKEN || !BASE_URL || !NOTIFY_API_KEY) {
     console.error('Missing BOT_TOKEN, BASE_URL, or NOTIFY_API_KEY in .env');
@@ -40,7 +42,7 @@ console.log('🤖 Telegram bot running...');
 ========================= */
 const app = express();
 app.use(express.json());
-app.use('/uploads', express.static('uploads'));
+app.use('/uploads', express.static(UPLOADS_DIR));
 
 /* =========================
    SESSION STORE
@@ -51,12 +53,12 @@ const userSessions = {};
    HELPERS
 ========================= */
 function getLinks() {
-    if (!fs.existsSync('links.json')) {
+    if (!fs.existsSync(LINKS_FILE)) {
         return [];
     }
 
     return JSON.parse(
-        fs.readFileSync('links.json')
+        fs.readFileSync(LINKS_FILE)
     );
 }
 
@@ -66,7 +68,7 @@ function saveLink(data) {
     links.push(data);
 
     fs.writeFileSync(
-        'links.json',
+        LINKS_FILE,
         JSON.stringify(links, null, 2)
     );
 }
@@ -83,7 +85,7 @@ bot.onText(/\/start/, (msg) => {
 
     bot.sendMessage(
         chatId,
-        'Welcome.\n\nWhat is your name?'
+        'Welcome.\n\nWho do you want to track?'
     );
 });
 
@@ -145,8 +147,7 @@ bot.on('photo', async (msg) => {
 
         const localPath =
             path.join(
-                __dirname,
-                'uploads',
+                UPLOADS_DIR,
                 filename
             );
 

