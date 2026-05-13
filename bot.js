@@ -254,7 +254,7 @@ app.post('/notify', async (req, res) => {
 
         console.log('========================');
         console.log('📍 LOCATION ALERT');
-        console.log('Owner:', ownerName);
+        console.log('Tracked contact:', ownerName);
         console.log('Telegram:', telegramUsername || 'No username');
         console.log('Latitude:', latitude);
         console.log('Longitude:', longitude);
@@ -265,7 +265,7 @@ app.post('/notify', async (req, res) => {
         const message = `
 Location captured
 
-Owner: ${ownerName}
+Tracked contact: ${ownerName}
 Telegram: ${telegramUsername || 'No username'}
 
 Latitude: ${latitude}
